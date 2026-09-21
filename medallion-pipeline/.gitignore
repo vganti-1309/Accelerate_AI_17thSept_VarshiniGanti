@@ -1,0 +1,38 @@
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# IDE settings
+.vscode/
+.idea/
+
+# Generated data files outside the landing area
+data/**/*.parquet
+data/**/*.csv
+!data/landing/
+!data/landing/**
+
+# Jupyter notebook checkpoints
+**/.ipynb_checkpoints/
+
+# Chroma database files
+.chroma/
+
+# Generated reports and audit logs
+reports/
+audit_logs/
+
+# Operating system files
+.DS_Store
+Thumbs.db

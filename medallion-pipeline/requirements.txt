@@ -1,0 +1,30 @@
+# Core agent frameworks
+langchain>=0.3.0,<1.0
+langgraph>=0.2.0,<1.0
+
+# Primary AI provider: Anthropic / Claude
+langchain-anthropic>=0.3.0,<1.0
+anthropic>=0.40.0,<1.0
+
+# Optional AI provider integrations
+langchain-groq>=0.2.0,<1.0
+langchain-google-genai>=2.0.0,<3.0
+langchain-openai>=0.3.0,<1.0
+google-generativeai>=0.8.0,<1.0
+groq>=0.13.0,<1.0
+
+# Web application and data processing
+streamlit>=1.40.0,<2.0
+pandas>=2.2.0,<3.0
+pyarrow>=18.0.0,<22.0
+duckdb>=1.1.0,<2.0
+
+# Vector memory and configuration
+chromadb>=0.5.0,<1.0
+python-dotenv>=1.0.0,<2.0
+pydantic>=2.9.0,<3.0
+
+# Reporting and tests
+matplotlib>=3.9.0,<4.0
+plotly>=5.24.0,<6.0
+pytest>=8.3.0,<9.0
