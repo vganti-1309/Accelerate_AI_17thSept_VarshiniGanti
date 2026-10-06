@@ -23,9 +23,49 @@ from core.llm import LLMClient
 from core.pipeline import PipelineState, ReviewDecision, Stage
 from core.sttm import sttm_to_markdown
 
-st.set_page_config(page_title="E-commerce Returns Analyzer", layout="wide", page_icon="📦")
+st.set_page_config(page_title="Retail Sales Analyzer", layout="wide", page_icon="📦")
 
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sample")
+
+
+def get_sample_file_paths() -> dict[str, str]:
+    file_paths: dict[str, str] = {}
+    for name in ("orders_sample", "returns_sample", "products_sample"):
+        path = os.path.join(SAMPLE_DIR, f"{name}.csv")
+        if os.path.exists(path):
+            file_paths[name] = path
+    return file_paths
+
+
+def canonical_table_name(raw_name: str) -> str:
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in raw_name.lower()).strip("_")
+    normalized = "_".join(part for part in normalized.split("_") if part)
+
+    if "order" in normalized:
+        return "orders"
+    if "return" in normalized:
+        return "returns"
+    if "product" in normalized:
+        return "products"
+    return normalized or "table"
+
+
+def save_uploaded_csvs(uploaded_files) -> dict[str, str]:
+    if not uploaded_files:
+        return {}
+
+    upload_dir = os.path.join(SAMPLE_DIR, "..", "_uploads", "intent")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_paths: dict[str, str] = {}
+    for idx, f in enumerate(uploaded_files):
+        name = os.path.splitext(f.name)[0] or f"upload_{idx + 1}"
+        canonical_name = canonical_table_name(name)
+        path = os.path.join(upload_dir, f"{canonical_name}.csv")
+        with open(path, "wb") as out:
+            out.write(f.getbuffer())
+        file_paths[canonical_name] = path
+    return file_paths
 
 
 @st.cache_resource
@@ -87,11 +127,10 @@ def sidebar_status(state: PipelineState | None):
 # Phase 1 — Chat UI for intent capture
 # ----------------------------------------------------------------------
 def render_intent_chat():
-    st.title("📦 E-commerce Returns Analyzer")
+    st.title("📦 Retail Sales Analyzer")
     st.caption(
-        "State your business intent in plain language. The Supervisor Agent will parse "
-        "it and drive the Bronze → Silver → Gold pipeline, with a human review gate at "
-        "every layer."
+        "State your business intent in plain language. Upload your CSVs and then ask the "
+        "system to analyze the returns data with a Bronze → Silver → Gold pipeline."
     )
 
     with st.expander("💡 Example prompts"):
@@ -106,22 +145,61 @@ def render_intent_chat():
         with st.chat_message(role):
             st.write(msg)
 
-    prompt = st.chat_input("Describe what you want to understand about returns...")
-    if prompt:
+    left_col, right_col = st.columns([1.0, 1.4])
+
+    with left_col:
+        st.subheader("1. Upload CSVs")
+        uploaded_files = st.file_uploader(
+            "Orders, returns, and products files",
+            type="csv",
+            accept_multiple_files=True,
+            key="intent_uploads",
+        )
+        if uploaded_files:
+            st.success(f"{len(uploaded_files)} CSV file(s) ready to use.")
+        else:
+            st.info("No files uploaded yet. The app will use bundled sample data automatically.")
+
+    with right_col:
+        st.subheader("2. Ask your business question")
+        with st.form("intent_form", clear_on_submit=True):
+            prompt = st.text_area(
+                "Describe what you want to understand about returns",
+                height=150,
+                placeholder="Example: Find the top categories by return rate and revenue loss over the last 6 months.",
+            )
+            analyze = st.form_submit_button("Analyze data", use_container_width=True)
+
+    if analyze and prompt:
         st.session_state.chat_history.append(("user", prompt))
+
+        file_paths = save_uploaded_csvs(uploaded_files)
+        if not file_paths:
+            file_paths = get_sample_file_paths()
+
         llm = get_llm()
         params = orchestrator.parse_intent(llm, prompt)
         state = orchestrator.initialize_pipeline(prompt, params)
+        state.uploaded_files = file_paths
         st.session_state.pipeline = state
 
         summary = params.get("summary", "Intent parsed.")
-        ack = (
-            f"Got it. **{summary}**\n\n"
-            f"- Categories: {', '.join(params.get('categories', ['all']))}\n"
-            f"- KPIs: {', '.join(params.get('kpis', []))}\n"
-            f"- Time window: {params.get('time_window_days', 180)} days\n\n"
-            "Next, upload your raw CSV files so the Bronze STTM Agent can propose a schema mapping."
-        )
+        if uploaded_files:
+            ack = (
+                f"Got it. **{summary}**\n\n"
+                f"- Categories: {', '.join(params.get('categories', ['all']))}\n"
+                f"- KPIs: {', '.join(params.get('kpis', []))}\n"
+                f"- Time window: {params.get('time_window_days', 180)} days\n\n"
+                f"I attached {len(uploaded_files)} CSV files and am preparing the Bronze mapping now."
+            )
+        else:
+            ack = (
+                f"Got it. **{summary}**\n\n"
+                f"- Categories: {', '.join(params.get('categories', ['all']))}\n"
+                f"- KPIs: {', '.join(params.get('kpis', []))}\n"
+                f"- Time window: {params.get('time_window_days', 180)} days\n\n"
+                "No files were uploaded, so I will use the bundled sample data for the Bronze review."
+            )
         st.session_state.chat_history.append(("assistant", ack))
         st.rerun()
 
@@ -133,31 +211,27 @@ def render_bronze(state: PipelineState):
     st.title("🥉 Bronze Layer — Raw Ingestion")
     st.caption("Upload your CSV exports (orders, returns, products) or use the bundled sample data.")
 
-    use_sample = st.checkbox("Use bundled sample data (data/sample/*.csv)", value=True)
-
-    file_paths: dict[str, str] = {}
-    if use_sample:
-        for name in ("orders_sample", "returns_sample", "products_sample"):
-            path = os.path.join(SAMPLE_DIR, f"{name}.csv")
-            if os.path.exists(path):
-                file_paths[name] = path
-        if not file_paths:
-            st.error("Sample data not found. Run `python data/sample/generate_sample_data.py` first.")
-            return
-        st.success(f"Loaded {len(file_paths)} sample files.")
+    if state.uploaded_files:
+        st.success(f"Using {len(state.uploaded_files)} uploaded CSV files from the previous step.")
+        use_sample = False
+        file_paths = state.uploaded_files
     else:
-        uploads = st.file_uploader(
-            "Upload CSV files", type="csv", accept_multiple_files=True
-        )
-        if uploads:
-            upload_dir = os.path.join(SAMPLE_DIR, "..", "_uploads", state.run_id)
-            os.makedirs(upload_dir, exist_ok=True)
-            for f in uploads:
-                name = os.path.splitext(f.name)[0]
-                path = os.path.join(upload_dir, f"{name}.csv")
-                with open(path, "wb") as out:
-                    out.write(f.getbuffer())
-                file_paths[name] = path
+        use_sample = st.checkbox("Use bundled sample data (data/sample/*.csv)", value=True)
+        file_paths = {}
+        if use_sample:
+            file_paths = get_sample_file_paths()
+            if not file_paths:
+                st.error("Sample data not found. Run `python data/sample/generate_sample_data.py` first.")
+                return
+            st.success(f"Loaded {len(file_paths)} sample files.")
+        else:
+            uploads = st.file_uploader(
+                "Upload CSV files", type="csv", accept_multiple_files=True
+            )
+            if uploads:
+                file_paths = save_uploaded_csvs(uploads)
+                state.uploaded_files = file_paths
+                st.success(f"Loaded {len(file_paths)} uploaded files.")
 
     if not file_paths:
         st.info("Waiting for files...")
