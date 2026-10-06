@@ -44,12 +44,26 @@ def normalize_category(raw: str) -> str:
     return CATEGORY_MASTER.get(key, raw.strip().title())
 
 
+def normalize_table_name(raw_name: str) -> str:
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in raw_name.lower()).strip("_")
+    normalized = "_".join(part for part in normalized.split("_") if part)
+
+    if "order" in normalized:
+        return "orders"
+    if "return" in normalized:
+        return "returns"
+    if "product" in normalized:
+        return "products"
+    return normalized or "unknown"
+
+
 def load_bronze(bronze_dir: str) -> dict[str, pd.DataFrame]:
     tables = {}
     for fname in os.listdir(bronze_dir):
         if fname.endswith(".parquet"):
             name = fname[: -len(".parquet")]
-            tables[name] = pd.read_parquet(os.path.join(bronze_dir, fname))
+            canonical_name = normalize_table_name(name)
+            tables[canonical_name] = pd.read_parquet(os.path.join(bronze_dir, fname))
     return tables
 
 
@@ -116,9 +130,9 @@ def materialize_silver(bronze_dir: str, run_id: str) -> str:
     run_dir = os.path.join(SILVER_DIR, run_id)
     os.makedirs(run_dir, exist_ok=True)
 
-    orders = tables["orders_sample"] if "orders_sample" in tables else tables.get("orders")
-    returns = tables["returns_sample"] if "returns_sample" in tables else tables.get("returns")
-    products = tables["products_sample"] if "products_sample" in tables else tables.get("products")
+    orders = tables.get("orders")
+    returns = tables.get("returns")
+    products = tables.get("products")
 
     if orders is not None:
         orders = orders.drop_duplicates()
