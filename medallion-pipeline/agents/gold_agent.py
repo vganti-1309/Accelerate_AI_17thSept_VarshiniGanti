@@ -26,7 +26,16 @@ def load_silver(silver_dir: str) -> dict[str, pd.DataFrame]:
     for fname in os.listdir(silver_dir):
         if fname.endswith(".parquet"):
             name = fname[: -len(".parquet")]
-            tables[name] = pd.read_parquet(os.path.join(silver_dir, fname))
+            normalized = name.lower()
+            if "order" in normalized:
+                key = "orders"
+            elif "return" in normalized:
+                key = "returns"
+            elif "product" in normalized:
+                key = "products"
+            else:
+                key = name
+            tables[key] = pd.read_parquet(os.path.join(silver_dir, fname))
     return tables
 
 
